@@ -1,11 +1,20 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
-import urllib.request
 import json
+import os
 
 app = FastAPI()
+
+# Fixed CORS: allow_credentials MUST be False when origins is "*"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False, 
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class Query(BaseModel):
     regions: List[str]
@@ -24,52 +33,37 @@ def calc_p95(data):
 @app.post("/api/latency")
 @app.post("/")
 def get_latency(query: Query):
-    # Fetch JSON directly from your GitHub repo to bypass Vercel file system issues
-    urls = [
-        "https://raw.githubusercontent.com/Biplov6977/TDS/main/vercel-latency/api/q-vercel-latency.json",
-        "https://raw.githubusercontent.com/Biplov6977/TDS/main/vercel-latency/q-vercel-latency.json"
-    ]
-    raw_data = None
-    for url in urls:
-        try:
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req) as response:
-                raw_data = json.loads(response.read().decode())
-                break
-        except:
-            continue
-            
-    if not raw_data:
-        return JSONResponse(content={"error": "Failed to fetch JSON"}, status_code=500)
+    try:
+        # Read the file cleanly from the api folder
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        file_path = os.path.join(base_dir, 'q-vercel-latency.json')
+        
+        with open(file_path) as f:
+            raw_data = json.load(f)
 
-    results = []
-    for region in query.regions:
-        region_data = [d for d in raw_data if d['region'] == region]
-        if not region_data:
-            continue
+        results = []
+        for region in query.regions:
+            region_data = [d for d in raw_data if d.get('region') == region]
+            if not region_data:
+                continue
+            
+            latencies = [d['latency_ms'] for d in region_data]
+            uptimes = [d['uptime_pct'] for d in region_data]
+            
+            avg_lat = sum(latencies) / len(latencies)
+            p95_lat = calc_p95(latencies)
+            avg_up = sum(uptimes) / len(uptimes)
+            breaches = sum(1 for l in latencies if l > query.threshold_ms)
+            
+            results.append({
+                "region": region,
+                "avg_latency": round(avg_lat, 2),
+                "p95_latency": round(p95_lat, 2),
+                "avg_uptime": round(avg_up, 3),
+                "breaches": breaches
+            })
         
-        latencies = [d['latency_ms'] for d in region_data]
-        uptimes = [d['uptime_pct'] for d in region_data]
-        
-        avg_lat = sum(latencies) / len(latencies)
-        p95_lat = calc_p95(latencies)
-        avg_up = sum(uptimes) / len(uptimes)
-        breaches = sum(1 for l in latencies if l > query.threshold_ms)
-        
-        results.append({
-            "region": region,
-            "avg_latency": round(avg_lat, 2),
-            "p95_latency": round(p95_lat, 2),
-            "avg_uptime": round(avg_up, 3),
-            "breaches": breaches
-        })
-    
-    # Force CORS headers
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Expose-Headers": "Access-Control-Allow-Origin"
-    }
-    
-    return JSONResponse(content={"regions": results}, headers=headers)
+        return {"regions": results}
+    except Exception as e:
+        # If anything fails, return a clean JSON error instead of crashing the server!
+        return {"regions": [], "error": str(e)}
