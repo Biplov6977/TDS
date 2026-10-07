@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
@@ -7,10 +8,11 @@ import os
 
 app = FastAPI()
 
-# Enable CORS for the autograder
+# Keep middleware as a backup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,9 +34,7 @@ def calc_p95(data):
 @app.post("/api/latency")
 @app.post("/")
 def get_latency(query: Query):
-    # Load the JSON data file from the parent directory
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    file_path = os.path.join(base_dir, 'q-vercel-latency.json')
+    file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'q-vercel-latency.json')
     
     with open(file_path) as f:
         raw_data = json.load(f)
@@ -61,4 +61,11 @@ def get_latency(query: Query):
             "breaches": breaches
         })
     
-    return {"regions": results}
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Expose-Headers": "Access-Control-Allow-Origin"
+    }
+    
+    return JSONResponse(content={"regions": results}, headers=headers)
