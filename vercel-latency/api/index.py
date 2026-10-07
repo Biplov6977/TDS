@@ -1,21 +1,11 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
+import urllib.request
 import json
-import os
 
 app = FastAPI()
-
-# Keep middleware as a backup
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 class Query(BaseModel):
     regions: List[str]
@@ -34,10 +24,23 @@ def calc_p95(data):
 @app.post("/api/latency")
 @app.post("/")
 def get_latency(query: Query):
-    file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'q-vercel-latency.json')
-    
-    with open(file_path) as f:
-        raw_data = json.load(f)
+    # Fetch JSON directly from your GitHub repo to bypass Vercel file system issues
+    urls = [
+        "https://raw.githubusercontent.com/Biplov6977/TDS/main/vercel-latency/api/q-vercel-latency.json",
+        "https://raw.githubusercontent.com/Biplov6977/TDS/main/vercel-latency/q-vercel-latency.json"
+    ]
+    raw_data = None
+    for url in urls:
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req) as response:
+                raw_data = json.loads(response.read().decode())
+                break
+        except:
+            continue
+            
+    if not raw_data:
+        return JSONResponse(content={"error": "Failed to fetch JSON"}, status_code=500)
 
     results = []
     for region in query.regions:
@@ -61,6 +64,7 @@ def get_latency(query: Query):
             "breaches": breaches
         })
     
+    # Force CORS headers
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
