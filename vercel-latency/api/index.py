@@ -1,20 +1,11 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List
 import json
 import os
 
 app = FastAPI()
-
-# Fixed CORS: allow_credentials MUST be False when origins is "*"
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False, 
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 class Query(BaseModel):
     regions: List[str]
@@ -30,11 +21,20 @@ def calc_p95(data):
         return d[n] + l * (d[n+1] - d[n])
     return float(d[n])
 
+# Explicitly handle preflight OPTIONS requests
+@app.options("/api/latency")
+@app.options("/")
+def options_handler():
+    return JSONResponse(
+        content="OK", 
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
 @app.post("/api/latency")
 @app.post("/")
 def get_latency(query: Query):
     try:
-        # Read the file cleanly from the api folder
+        # Load the file exactly from the api folder
         base_dir = os.path.dirname(os.path.abspath(__file__))
         file_path = os.path.join(base_dir, 'q-vercel-latency.json')
         
@@ -63,7 +63,15 @@ def get_latency(query: Query):
                 "breaches": breaches
             })
         
-        return {"regions": results}
+        # Hardcode the header into the final response
+        return JSONResponse(
+            content={"regions": results},
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
     except Exception as e:
-        # If anything fails, return a clean JSON error instead of crashing the server!
-        return {"regions": [], "error": str(e)}
+        # Even if the code crashes, return the CORS header!
+        return JSONResponse(
+            content={"regions": [], "error": str(e)},
+            status_code=200,
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
